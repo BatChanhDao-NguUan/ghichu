@@ -1,0 +1,7 @@
+{
+  "name": "Life Notes",
+  "description": "A private, offline-first note-taking application designed for mindfulness and reflection. Features free notes, calendar journaling, and encrypted protected notes with daily Buddhist wisdom.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
