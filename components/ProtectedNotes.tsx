@@ -1,5 +1,24 @@
+
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit3, Lock, Key, FileText, AlertTriangle, X, ShieldAlert, Check, Loader2, Save } from 'lucide-react';
+import { Plus, Trash2, Edit3, Lock, Key, FileText, AlertTriangle, X, ShieldAlert, Check, Loader2, Save, GripVertical } from 'lucide-react';
+import { 
+  DndContext, 
+  closestCenter, 
+  KeyboardSensor, 
+  PointerSensor, 
+  useSensor, 
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core';
+import { 
+  arrayMove, 
+  SortableContext, 
+  sortableKeyboardCoordinates, 
+  horizontalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+
 import { TabbedNote, Language } from '../types';
 import { StorageService } from '../services/storage';
 import { CryptoService } from '../services/crypto';
@@ -13,6 +32,68 @@ interface CreateNotesProps {
   onDirtyChange?: (isDirty: boolean) => void;
 }
 
+interface SortableTabProps {
+  tab: TabbedNote;
+  isActive: boolean;
+  onClick: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+}
+
+const SortableTab: React.FC<SortableTabProps> = ({ tab, isActive, onClick, onRename, onDelete }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id: tab.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 50 : 'auto',
+    opacity: isDragging ? 0.6 : 1,
+  };
+
+  return (
+    <div 
+      ref={setNodeRef} 
+      style={style} 
+      className="relative group shrink-0"
+    >
+      <div className="flex items-center">
+        {/* Drag Handle */}
+        <div 
+          {...attributes} 
+          {...listeners}
+          className={`absolute left-2 z-10 p-1 cursor-grab active:cursor-grabbing text-stone-300 hover:text-stone-500 md:opacity-0 group-hover:opacity-100 transition-opacity ${isActive ? 'text-amber-200' : ''}`}
+        >
+          <GripVertical size={12} />
+        </div>
+
+        <button
+          onClick={onClick}
+          className={`flex items-center gap-2 pl-7 pr-4 py-2 rounded-xl text-sm font-bold transition-all border ${
+            isActive 
+              ? 'bg-amber-800 text-white border-amber-900 shadow-lg' 
+              : 'bg-white text-stone-500 hover:bg-stone-50 border-stone-100'
+          }`}
+        >
+          {tab.passwordHash && <Lock size={12}/>}
+          <span className="max-w-[120px] truncate">{tab.name}</span>
+        </button>
+      </div>
+
+      <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-1 z-10 scale-90">
+         <button onClick={(e) => { e.stopPropagation(); onRename(); }} className="p-1.5 bg-blue-500 text-white rounded-full shadow-md hover:bg-blue-600 transition-colors"><Edit3 size={10}/></button>
+         <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1.5 bg-rose-500 text-white rounded-full shadow-md hover:bg-rose-600 transition-colors"><Trash2 size={10}/></button>
+      </div>
+    </div>
+  );
+};
+
 export const CreateNotes: React.FC<CreateNotesProps> = ({ language, accentColor, onBack, onDirtyChange }) => {
   const [tabs, setTabs] = useState<TabbedNote[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -20,7 +101,6 @@ export const CreateNotes: React.FC<CreateNotesProps> = ({ language, accentColor,
   const [authPassword, setAuthPassword] = useState('');
   const [decryptedContent, setDecryptedContent] = useState('');
   
-  // Trạng thái thay đổi chưa lưu
   const [isDirty, setIsDirty] = useState(false);
   const [unsavedData, setUnsavedData] = useState({ title: '', content: '' });
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
@@ -38,6 +118,17 @@ export const CreateNotes: React.FC<CreateNotesProps> = ({ language, accentColor,
   const [newNameInput, setNewNameInput] = useState('');
 
   const t = TRANSLATIONS[language];
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   useEffect(() => {
     const saved = localStorage.getItem(StorageService.getKey('tabbed_notes'));
@@ -57,6 +148,20 @@ export const CreateNotes: React.FC<CreateNotesProps> = ({ language, accentColor,
   const saveToStorage = (updatedTabs: TabbedNote[]) => {
     setTabs(updatedTabs);
     localStorage.setItem(StorageService.getKey('tabbed_notes'), JSON.stringify(updatedTabs));
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      setTabs((items) => {
+        const oldIndex = items.findIndex((i) => i.id === active.id);
+        const newIndex = items.findIndex((i) => i.id === over.id);
+        const newOrder = arrayMove(items, oldIndex, newIndex);
+        localStorage.setItem(StorageService.getKey('tabbed_notes'), JSON.stringify(newOrder));
+        return newOrder;
+      });
+    }
   };
 
   const validateTabPassword = (input: string) => {
@@ -224,25 +329,28 @@ export const CreateNotes: React.FC<CreateNotesProps> = ({ language, accentColor,
   return (
     <div className="flex flex-col h-full space-y-4">
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-2 shrink-0">
-        {tabs.map(tab => (
-          <div key={tab.id} className="relative group shrink-0">
-            <button
-              onClick={() => handleTabClick(tab)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all border ${
-                activeTabId === tab.id 
-                  ? 'bg-amber-800 text-white border-amber-900 shadow-lg' 
-                  : 'bg-white text-stone-500 hover:bg-stone-50 border-stone-100'
-              }`}
-            >
-              {tab.passwordHash && <Lock size={12}/>}
-              <span className="max-w-[120px] truncate">{tab.name}</span>
-            </button>
-            <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-1 z-10 scale-90">
-               <button onClick={(e) => { e.stopPropagation(); setRenameTabId(tab.id); setNewNameInput(tab.name); }} className="p-1.5 bg-blue-500 text-white rounded-full shadow-md"><Edit3 size={10}/></button>
-               <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(tab.id); }} className="p-1.5 bg-rose-500 text-white rounded-full shadow-md"><Trash2 size={10}/></button>
-            </div>
-          </div>
-        ))}
+        <DndContext 
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext 
+            items={tabs.map(t => t.id)}
+            strategy={horizontalListSortingStrategy}
+          >
+            {tabs.map(tab => (
+              <SortableTab 
+                key={tab.id}
+                tab={tab}
+                isActive={activeTabId === tab.id}
+                onClick={() => handleTabClick(tab)}
+                onRename={() => { setRenameTabId(tab.id); setNewNameInput(tab.name); }}
+                onDelete={() => setConfirmDeleteId(tab.id)}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
+        
         <button onClick={handleNewTabClick} className="p-2 bg-stone-100 text-stone-400 hover:bg-stone-200 rounded-xl transition-colors border border-dashed border-stone-300" title={t.createNewSpaceTitle}><Plus size={20} /></button>
       </div>
 
